@@ -1,0 +1,74 @@
+name: CI
+
+# Run on every push to main and on every pull request that targets main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The workflow only needs to read the code. Least privilege by default.
+permissions:
+  contents: read
+
+# If you push twice quickly, cancel the older run for the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Install the .NET SDK pinned in global.json
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore NuGet packages
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests
+        run: dotnet test --no-build --configuration Release --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults
+
+  database-smoke-test:
+    name: SQL Server container starts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Create .env from the example
+        run: cp .env.example .env
+
+      - name: Start SQL Server and wait until healthy
+        run: docker compose up --detach --wait --wait-timeout 180
+
+      - name: Run a query against SQL Server
+        run: |
+          docker compose exec -T sqlserver bash -c \
+            '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b -Q "SELECT @@VERSION"'
+
+      - name: Show SQL Server logs if anything failed
+        if: failure()
+        run: docker compose logs sqlserver
+
+      - name: Stop and remove the container
+        if: always()
+        run: docker compose down --volumes

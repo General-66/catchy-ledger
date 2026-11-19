@@ -1,0 +1,26 @@
+# Local development environment. Start it with:  docker compose up -d --wait
+# Phase 0 runs SQL Server only; the API joins this file in a later phase.
+name: catchy-ledger
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      # Read from the .env file next to this one. Compose stops with this message if it's missing.
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Copy .env.example to .env and set MSSQL_SA_PASSWORD}
+    ports:
+      - "${MSSQL_PORT:-1434}:1434"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      # "$$" stops Compose from filling in the variable, so the container's own shell does it.
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -b -Q \"SELECT 1\" -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  sqlserver-data:

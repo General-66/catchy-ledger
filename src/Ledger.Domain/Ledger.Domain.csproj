@@ -1,0 +1,6 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The domain is the heart of the ledger: Money, Account, Transaction.
+       It must not reference any other project or package. -->
+
+</Project>
