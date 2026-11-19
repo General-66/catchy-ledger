@@ -2,7 +2,7 @@
 
 A double-entry ledger engine: a C# API that records money movements as balanced transactions, where every transaction's lines sum to exactly zero.
 
-> **Status:** Phase 0 (setup). The domain model, database and API arrive in later phases.
+> **Status:** Phase 1 (domain model). Money, accounts and balanced transactions are in place, with unit and property tests. The database and API arrive in later phases.
 
 ## Why it exists
 
