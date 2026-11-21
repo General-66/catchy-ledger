@@ -1,7 +1,19 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<ItemGroup>
+	  <PackageReference Include="Dapper" />
+	  <PackageReference Include="dbup-sqlserver" />
+	  <PackageReference Include="Microsoft.Data.SqlClient" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<ProjectReference Include="..\Ledger.Domain\Ledger.Domain.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<!-- The SQL scripts live in db/ at the root of the repo. This compiles each one into the DLL as an
+         embedded resource named Ledger.Migrations.<file name>, which is where LedgerMigrator looks for them.
+         LinkBase shows them in Solution Explorer under a Migrations folder of this project. -->
+		<EmbeddedResource Include="..\..\db\*.sql" LinkBase="Migrations" LogicalName="Ledger.Migrations.%(Filename)%(Extension)" />
+	</ItemGroup>
 </Project>

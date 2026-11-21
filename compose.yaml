@@ -4,7 +4,7 @@ name: catchy-ledger
 
 services:
   sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2022-CU26-ubuntu-22.04
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: "Developer"
