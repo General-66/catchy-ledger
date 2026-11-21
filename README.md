@@ -2,8 +2,7 @@
 
 A double-entry ledger engine: a C# API that records money movements as balanced transactions, where every transaction's lines sum to exactly zero.
 
-> **Status:** Phase 1 (domain model). Money, accounts and balanced transactions are in place, with unit and property tests. The database and API arrive in later phases.
-
+> **Status:** Phase 2 (persistence and immutability). Transactions live in SQL Server append-only ledger tables, posted only through stored procedures that re-check every rule, with integration tests against a real SQL Server. The API arrives in Phase 3.
 ## Why it exists
 
 Real financial systems never "edit a balance". They record movements between accounts, keep every record forever, and prove the books balance. This project builds that from scratch to learn immutability, audit trails, idempotency and transaction isolation.
