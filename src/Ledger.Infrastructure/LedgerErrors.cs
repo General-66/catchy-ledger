@@ -30,6 +30,6 @@ public static class LedgerErrors
     /// <summary>SQL Server's own error when a user lacks a permission, or has been denied one.</summary>
     public const int PermissionDenied = 229;
 
-    /// <summary>SQL Server's own error for an UPDATE on an append-only ledger table, whoever runs it.</summary>
+    /// <summary>SQL Server's own error for an UPDATE or DELETE on an append-only ledger table, whoever runs it.</summary>
     public const int AppendOnlyLedgerTable = 37359;
 }
