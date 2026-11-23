@@ -167,6 +167,66 @@ public sealed class SqlLedger
         return new Money(amountMinor, account.Currency);
     }
 
+    /// <summary>
+    /// Finds several accounts in one round trip, keyed by Id. An Id with no account is simply missing from the result,
+    /// which is how the API spots a posting line that names an account that doesn't exist.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<long, Account>> GetAccountsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        long[] distinctIds = [.. ids.Distinct()];
+        if (distinctIds.Length == 0)
+        {
+            return new Dictionary<long, Account>();
+        }
+
+        // Dapper expands "IN @Ids" into one parameter per Id: IN (@Ids1, @Ids2, ...).
+        const string sql = """
+            SELECT Id, Code, Name, Type, Currency, AllowOverdraft
+            FROM dbo.Accounts
+            WHERE Id IN @Ids;
+            """;
+
+        await using var connection = new SqlConnection(_connectionString);
+        var rows = await connection.QueryAsync<AccountRow>(new CommandDefinition(
+            sql, new { Ids = distinctIds }, cancellationToken: cancellationToken));
+
+        return rows.ToDictionary(
+            row => row.Id,
+            row => new Account(row.Id, row.Code, row.Name, Enum.Parse<AccountType>(row.Type), Currency.FromCode(row.Currency), row.AllowOverdraft));
+    }
+
+    /// <summary>
+    /// Finds the transaction a caller already posted with this Idempotency-Key, or returns null if the key is new.
+    /// The request hash comes with it, so the API can tell a retry from a different request that reuses the key.
+    /// </summary>
+    public async Task<IdempotencyRecord?> FindByIdempotencyKeyAsync(
+        string createdBy, string idempotencyKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(createdBy);
+        ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
+
+        // UQ_Transactions_CreatedBy_IdempotencyKey makes this an index seek, and guarantees at most one row.
+        const string sql = """
+            SELECT Id, RequestHash
+            FROM dbo.Transactions
+            WHERE CreatedBy = @CreatedBy AND IdempotencyKey = @IdempotencyKey;
+            """;
+
+        await using var connection = new SqlConnection(_connectionString);
+        var row = await connection.QuerySingleOrDefaultAsync<IdempotencyRow>(new CommandDefinition(
+            sql, new { CreatedBy = createdBy, IdempotencyKey = idempotencyKey }, cancellationToken: cancellationToken));
+
+        return row is null ? null : new IdempotencyRecord(row.Id, row.RequestHash);
+    }
+
+    /// <summary>Proves the app can reach the books with its own login. The /health endpoint calls this.</summary>
+    public async Task CheckConnectionAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.ExecuteScalarAsync<int?>(new CommandDefinition(
+            "SELECT TOP (1) 1 FROM dbo.Postings;", cancellationToken: cancellationToken));
+    }
     // The three values every write carries, as procedure parameters.
     private static DynamicParameters WithRequest(RequestInfo request)
     {
@@ -236,5 +296,12 @@ public sealed class SqlLedger
         public long AmountMinor { get; init; }
 
         public string Currency { get; init; } = "";
+    }
+
+    private sealed class IdempotencyRow
+    {
+        public long Id { get; init; }
+
+        public byte[] RequestHash { get; init; } = [];
     }
 }
