@@ -1,6 +1,154 @@
-@Ledger.Api_HostAddress = http://localhost:5010
+@run = 0002
 
-GET {{Ledger.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+# The plan's betting example, end to end through the API.
+#
+# 1. Start Ledger.Api (F5), then pick "dev" in the environment list at the top right of this editor.
+#    The API keys come from Ledger.Api's User Secrets, through http-client.env.json.
+# 2. Click "Send request" above each request, in order, and read the response on the right.
+# 3. To run it all again from the top, change the number on the first line: a new wallet code and new Idempotency-Keys.
+#
+# The house accounts are seeded by db/0007: 1 Bank, 2 Open Bets, 3 Betting Revenue, 4 Payouts.
 
-###
+
+## 1. Open the customer's wallet: a liability, which may never be overdrawn
+# @name wallet
+POST {{HostAddress}}/accounts
+X-Api-Key: {{WriteKey}}
+Content-Type: application/json
+
+{
+  "code": "2000-{{run}}",
+  "name": "Customer Wallet {{run}}",
+  "type": "Liability",
+  "currency": "ZAR",
+  "allowOverdraft": false
+}
+
+### 2. Step 1: the customer deposits R500. Debit Bank, credit the wallet.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: deposit-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Customer deposit",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": 1, "side": "Debit", "amountMinor": 50000 },
+    { "accountId": {{wallet.response.body.$.id}}, "side": "Credit", "amountMinor": 50000 }
+  ]
+}
+
+### 3. The same deposit again, as a client retrying after a timeout would send it.
+#      Same transaction Id, the header Idempotent-Replayed: true, and no second R500.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: deposit-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Customer deposit",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": 1, "side": "Debit", "amountMinor": 50000 },
+    { "accountId": {{wallet.response.body.$.id}}, "side": "Credit", "amountMinor": 50000 }
+  ]
+}
+
+### 4. The same key with a different amount: 422, code IdempotencyKeyReused. Nothing is posted.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: deposit-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Customer deposit",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": 1, "side": "Debit", "amountMinor": 90000 },
+    { "accountId": {{wallet.response.body.$.id}}, "side": "Credit", "amountMinor": 90000 }
+  ]
+}
+
+### 5. Step 2: the customer bets R100. The stake moves from the wallet to Open Bets.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: bet-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Bet placed",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": {{wallet.response.body.$.id}}, "side": "Debit", "amountMinor": 10000 },
+    { "accountId": 2, "side": "Credit", "amountMinor": 10000 }
+  ]
+}
+
+### 6. Step 3b: the bet is settled as a win paying R250. Three lines, still summing to zero.
+# @name win
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: win-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Bet won",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": 2, "side": "Debit", "amountMinor": 10000 },
+    { "accountId": 4, "side": "Debit", "amountMinor": 15000 },
+    { "accountId": {{wallet.response.body.$.id}}, "side": "Credit", "amountMinor": 25000 }
+  ]
+}
+
+### 7. The wallet now reads R650 on its normal side: stored as -65000.
+GET {{HostAddress}}/accounts/{{wallet.response.body.$.id}}
+X-Api-Key: {{ReadKey}}
+
+### 8. The result was overturned: the bet actually lost. Reverse the win, never edit it.
+POST {{HostAddress}}/transactions/{{win.response.body.$.id}}/reverse
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: reverse-win-{{run}}
+
+### 9. Reversing it again with a new key: 409, code AlreadyReversed.
+POST {{HostAddress}}/transactions/{{win.response.body.$.id}}/reverse
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: reverse-win-again-{{run}}
+
+### 10. Step 3a: settle the bet as a loss. The stake becomes Betting Revenue.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: loss-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Bet lost",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": 2, "side": "Debit", "amountMinor": 10000 },
+    { "accountId": 3, "side": "Credit", "amountMinor": 10000 }
+  ]
+}
+
+### 11. The wallet is back to R400: R500 deposited, R100 lost. Every step is still in the books.
+GET {{HostAddress}}/accounts/{{wallet.response.body.$.id}}
+X-Api-Key: {{ReadKey}}
+
+### 12. A Read key can't post: 403, code InsufficientRole.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{ReadKey}}
+Idempotency-Key: read-key-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Not allowed",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": 1, "side": "Debit", "amountMinor": 100 },
+    { "accountId": 2, "side": "Credit", "amountMinor": 100 }
+  ]
+}
+
+### 13. No key at all: 401, code ApiKeyMissing.
+GET {{HostAddress}}/accounts/1
