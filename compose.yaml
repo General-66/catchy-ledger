@@ -11,7 +11,7 @@ services:
       # Read from the .env file next to this one. Compose stops with this message if it's missing.
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Copy .env.example to .env and set MSSQL_SA_PASSWORD}
     ports:
-      - "${MSSQL_PORT:-1434}:1434"
+      - "${MSSQL_PORT:-14330}:1433"
     volumes:
       - sqlserver-data:/var/opt/mssql
     healthcheck:

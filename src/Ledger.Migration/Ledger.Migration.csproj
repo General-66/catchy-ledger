@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<UserSecretsId>c5db8277-0309-4f7f-a687-32429acaef85</UserSecretsId>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+	  <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Ledger.Infrastructure\Ledger.Infrastructure.csproj" />
+	</ItemGroup>
+
+</Project>

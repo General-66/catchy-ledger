@@ -7,6 +7,7 @@
     <Project Path="src/Ledger.Api/Ledger.Api.csproj" />
     <Project Path="src/Ledger.Domain/Ledger.Domain.csproj" />
     <Project Path="src/Ledger.Infrastructure/Ledger.Infrastructure.csproj" />
+    <Project Path="src/Ledger.Migration/Ledger.Migration.csproj" Id="25cd47dd-5cf0-49e3-90fe-c796b8fef781" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Ledger.Tests.Integration/Ledger.Tests.Integration.csproj" />

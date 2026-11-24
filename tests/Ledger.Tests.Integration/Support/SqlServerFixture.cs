@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using Dapper;
 using Ledger.Infrastructure;
 using Microsoft.Data.SqlClient;
 using Testcontainers.MsSql;
@@ -9,7 +8,7 @@ namespace Ledger.Tests.Integration.Support;
 /// <summary>
 /// One throwaway SQL Server container for the whole test run, and a fresh, fully migrated database
 /// for each test class that asks for one. Ledger tables can't be emptied, so tests never share books
-/// with another class.
+/// with another class. Each class can also have the whole API, running in memory against its database.
 /// </summary>
 public sealed class SqlServerFixture : IAsyncLifetime
 {
@@ -26,47 +25,52 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     private readonly ConcurrentDictionary<string, Lazy<Task<LedgerDatabase>>> _databases = new();
 
-    public async Task InitializeAsync()
+    private readonly ConcurrentDictionary<string, Lazy<Task<LedgerApiFactory>>> _apis = new();
+
+    public async Task InitializeAsync() => await _container.StartAsync();
+
+    public async Task DisposeAsync()
     {
-        await _container.StartAsync();
+        foreach (var api in _apis.Values.Where(api => api.IsValueCreated))
+        {
+            await (await api.Value).DisposeAsync();
+        }
 
-        // A server login for the app, like the one the API gets in Phase 3. Each database maps a user to it.
-        await using var connection = new SqlConnection(_container.GetConnectionString());
-        await connection.ExecuteAsync($"CREATE LOGIN {AppLogin} WITH PASSWORD = '{_appPassword}';");
+        await _container.DisposeAsync();
     }
-
-    public async Task DisposeAsync() => await _container.DisposeAsync();
 
     /// <summary>
     /// The database for one test class, created and migrated the first time the class asks.
     /// Every test in the class gets the same database, so each test creates its own accounts.
     /// </summary>
     public Task<LedgerDatabase> DatabaseForAsync(string testClassName) =>
-        _databases.GetOrAdd(testClassName, name => new Lazy<Task<LedgerDatabase>>(() => CreateDatabaseAsync(name))).Value;
+        _databases.GetOrAdd(testClassName, name => new Lazy<Task<LedgerDatabase>>(() => Task.Run(() => CreateDatabase(name)))).Value;
 
-    private async Task<LedgerDatabase> CreateDatabaseAsync(string testClassName)
+    /// <summary>
+    /// The API for one test class, running in memory against that class's database, started the first time the class
+    /// asks. Every test in the class shares it, so each test opens its own accounts.
+    /// </summary>
+    public Task<LedgerApiFactory> ApiForAsync(string testClassName) =>
+        _apis.GetOrAdd(testClassName, name => new Lazy<Task<LedgerApiFactory>>(async () =>
+            new LedgerApiFactory((await DatabaseForAsync(name)).AppConnectionString))).Value;
+
+    private LedgerDatabase CreateDatabase(string testClassName)
     {
         var admin = new SqlConnectionStringBuilder(_container.GetConnectionString())
         {
             InitialCatalog = $"Ledger_{testClassName}",
         };
 
-        // Creates the database, then runs every script in db/ against it: exactly what Phase 3 will do for real.
-        LedgerMigrator.Migrate(admin.ConnectionString);
-
-        await using (var connection = new SqlConnection(admin.ConnectionString))
-        {
-            await connection.ExecuteAsync($"""
-                CREATE USER {AppLogin} FOR LOGIN {AppLogin};
-                ALTER ROLE ledger_app ADD MEMBER {AppLogin};
-                """);
-        }
-
         var app = new SqlConnectionStringBuilder(admin.ConnectionString)
         {
             UserID = AppLogin,
             Password = _appPassword,
         };
+
+        // Exactly what Ledger.Migrator does on your laptop: create the database, run every script in db/,
+        // then create the app's login and add its user to the ledger_app role.
+        LedgerMigrator.Migrate(admin.ConnectionString);
+        LedgerMigrator.EnsureAppUser(admin.ConnectionString, app.ConnectionString);
 
         return new LedgerDatabase(admin.ConnectionString, app.ConnectionString);
     }

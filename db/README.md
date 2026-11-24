@@ -12,6 +12,7 @@ Every `.sql` file here is compiled into `Ledger.Infrastructure.dll`, so a new sc
 | `0004_create_usp_post_transaction.sql` | The only way to post: re-checks every rule, then inserts all lines or none |
 | `0005_create_usp_reverse_transaction.sql` | Posts the mirror image of a transaction, once |
 | `0006_create_app_role.sql` | The `ledger_app` role: read the books, write only through the procedures |
+| `0007_seed_house_accounts.sql` | The four house accounts from the betting example, with fixed Ids 1 to 4 |
 
 Rules:
 
