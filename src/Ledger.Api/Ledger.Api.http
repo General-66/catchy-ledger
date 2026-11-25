@@ -1,4 +1,4 @@
-@run = 0002
+@run = 0003
 
 # The plan's betting example, end to end through the API.
 #
@@ -152,3 +152,18 @@ Content-Type: application/json
 
 ### 13. No key at all: 401, code ApiKeyMissing.
 GET {{HostAddress}}/accounts/1
+
+### 14. A R1,000 bet from the R400 wallet: 422, code InsufficientFunds. Nothing is posted, and the key stays unused.
+POST {{HostAddress}}/transactions
+X-Api-Key: {{WriteKey}}
+Idempotency-Key: too-big-{{run}}
+Content-Type: application/json
+
+{
+  "description": "Bet placed",
+  "currency": "ZAR",
+  "lines": [
+    { "accountId": {{wallet.response.body.$.id}}, "side": "Debit", "amountMinor": 100000 },
+    { "accountId": 2, "side": "Credit", "amountMinor": 100000 }
+  ]
+}

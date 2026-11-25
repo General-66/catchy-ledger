@@ -65,6 +65,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
         {
             UserID = AppLogin,
             Password = _appPassword,
+            MaxPoolSize = 200,
         };
 
         // Exactly what Ledger.Migrator does on your laptop: create the database, run every script in db/,

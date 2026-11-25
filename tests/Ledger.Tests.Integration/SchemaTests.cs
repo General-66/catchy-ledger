@@ -16,13 +16,14 @@ public sealed class SchemaTests(SqlServerFixture sqlServer) : IAsyncLifetime
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
-    public async Task Transactions_and_Postings_are_append_only_ledger_tables_and_Accounts_is_not()
+    public async Task Transactions_and_Postings_are_append_only_ledger_tables_and_the_others_are_not()
     {
         const string sql = "SELECT ledger_type_desc FROM sys.tables WHERE object_id = OBJECT_ID(@Table);";
 
         Assert.Equal("APPEND_ONLY_LEDGER_TABLE", await _database.ScalarAsync<string>(sql, new { Table = "dbo.Transactions" }));
         Assert.Equal("APPEND_ONLY_LEDGER_TABLE", await _database.ScalarAsync<string>(sql, new { Table = "dbo.Postings" }));
         Assert.Equal("NON_LEDGER_TABLE", await _database.ScalarAsync<string>(sql, new { Table = "dbo.Accounts" }));
+        Assert.Equal("NON_LEDGER_TABLE", await _database.ScalarAsync<string>(sql, new { Table = "dbo.AccountBalances" }));
     }
 
     [Fact]
@@ -42,7 +43,7 @@ public sealed class SchemaTests(SqlServerFixture sqlServer) : IAsyncLifetime
         var scriptsInDb = typeof(LedgerMigrator).Assembly.GetManifestResourceNames()
             .Count(name => name.StartsWith(LedgerMigrator.ScriptPrefix, StringComparison.Ordinal));
 
-        Assert.Equal(7, scriptsInDb);
+        Assert.Equal(10, scriptsInDb);
         Assert.Equal(scriptsInDb, scriptsRun);
     }
 
@@ -51,7 +52,7 @@ public sealed class SchemaTests(SqlServerFixture sqlServer) : IAsyncLifetime
     {
         LedgerMigrator.Migrate(_database.AdminConnectionString);
 
-        Assert.Equal(7, await _database.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.SchemaVersions;"));
+        Assert.Equal(10, await _database.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.SchemaVersions;"));
     }
 
     [Fact]
@@ -64,5 +65,13 @@ public sealed class SchemaTests(SqlServerFixture sqlServer) : IAsyncLifetime
         Assert.Equal(
             new[] { "1 1000 Bank Asset", "2 2100 Open Bets Liability", "3 4000 Betting Revenue Income", "4 5000 Payouts Expense" },
             accounts);
+    }
+
+    [Fact]
+    public async Task Every_account_has_a_stored_balance_including_the_seeded_house_accounts()
+    {
+        // Script 0008 worked out a balance for every account that existed before it; usp_CreateAccount adds one for each new one.
+        Assert.Empty(await _database.AccountsWithWrongBalancesAsync());
+        Assert.Equal(4, await _database.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.AccountBalances WHERE AccountId <= 4 AND BalanceMinor = 0;"));
     }
 }

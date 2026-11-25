@@ -13,4 +13,7 @@
     <Project Path="tests/Ledger.Tests.Integration/Ledger.Tests.Integration.csproj" />
     <Project Path="tests/Ledger.Tests.Unit/Ledger.Tests.Unit.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Ledger.RaceLab/Ledger.RaceLab.csproj" Id="99f0741e-ec10-47df-80a7-6ef840e8830d" />
+  </Folder>
 </Solution>

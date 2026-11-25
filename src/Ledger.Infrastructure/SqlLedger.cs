@@ -8,42 +8,57 @@ namespace Ledger.Infrastructure;
 /// <summary>
 /// The ledger in SQL Server. Money only moves through the two stored procedures; this class turns
 /// domain objects into procedure calls and reads the results back. It opens a short-lived connection
-/// per call: connection pooling makes that cheap.
+/// per call: connection pooling makes that cheap. A write that SQL Server picks as a deadlock victim
+/// is run again, as its <see cref="SqlRetryPolicy"/> says.
 /// </summary>
 public sealed class SqlLedger
 {
     /// <summary>The longest description the Transactions table stores (nvarchar(200)).</summary>
     public const int MaxDescriptionLength = 200;
 
-    private readonly string _connectionString;
+    /// <summary>The longest account code the Accounts table stores (varchar(20)).</summary>
+    public const int MaxAccountCodeLength = 20;
 
-    public SqlLedger(string connectionString)
+    /// <summary>The longest account name the Accounts table stores (nvarchar(100)).</summary>
+    public const int MaxAccountNameLength = 100;
+
+    private readonly string _connectionString;
+    private readonly SqlRetryPolicy _retryPolicy;
+
+    public SqlLedger(string connectionString, SqlRetryPolicy? retryPolicy = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _connectionString = connectionString;
+        _retryPolicy = retryPolicy ?? SqlRetryPolicy.Default;
     }
 
-    /// <summary>Opens an account and returns it with the Id SQL Server gave it.</summary>
+    /// <summary>
+    /// Opens an account, with a stored balance of zero, through dbo.usp_CreateAccount, and returns it with the Id
+    /// SQL Server gave it. A code already in use fails with error 2627 on UQ_Accounts_Code.
+    /// </summary>
     public async Task<Account> CreateAccountAsync(
         string code, string name, AccountType type, Currency currency, bool allowOverdraft, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(currency);
+        // A stored procedure silently cuts a too-long value down to its parameter's size, as RequestInfo explains.
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(code.Length, MaxAccountCodeLength, nameof(code));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(name.Length, MaxAccountNameLength, nameof(name));
 
-        const string sql = """
-            INSERT INTO dbo.Accounts (Code, Name, Type, Currency, AllowOverdraft)
-            OUTPUT INSERTED.Id
-            VALUES (@Code, @Name, @Type, @Currency, @AllowOverdraft);
-            """;
+        var parameters = new DynamicParameters();
+        parameters.Add("@Code", code);
+        parameters.Add("@Name", name);
+        parameters.Add("@Type", type.ToString());
+        parameters.Add("@Currency", currency.Code);
+        parameters.Add("@AllowOverdraft", allowOverdraft);
+        parameters.Add("@AccountId", dbType: DbType.Int64, direction: ParameterDirection.Output);
 
         await using var connection = new SqlConnection(_connectionString);
-        var id = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            sql,
-            new { Code = code, Name = name, Type = type.ToString(), Currency = currency.Code, AllowOverdraft = allowOverdraft },
-            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "dbo.usp_CreateAccount", parameters, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
 
-        return new Account(id, code, name, type, currency, allowOverdraft);
+        return new Account(parameters.Get<long>("@AccountId"), code, name, type, currency, allowOverdraft);
     }
 
     /// <summary>Finds an account by its Id, or returns null if there's none.</summary>
@@ -66,7 +81,8 @@ public sealed class SqlLedger
 
     /// <summary>
     /// Posts a balanced transaction through dbo.usp_PostTransaction and returns its new Id.
-    /// The database checks every rule again; if one fails, the SqlException's Number is one of <see cref="LedgerErrors"/>.
+    /// The database checks every rule again, and that no account goes below zero that mustn't; if one fails,
+    /// the SqlException's Number is one of <see cref="LedgerErrors"/>, such as InsufficientFunds.
     /// </summary>
     public async Task<long> PostAsync(Transaction transaction, RequestInfo request, CancellationToken cancellationToken = default)
     {
@@ -77,17 +93,21 @@ public sealed class SqlLedger
 
         using var lines = ToPostingLines(transaction);
 
-        var parameters = WithRequest(request);
-        parameters.Add("@Description", transaction.Description);
-        parameters.Add("@EffectiveDate", transaction.EffectiveDate.ToDateTime(TimeOnly.MinValue), DbType.Date);
-        parameters.Add("@Lines", lines.AsTableValuedParameter("dbo.PostingLineList"));
-        parameters.Add("@TransactionId", dbType: DbType.Int64, direction: ParameterDirection.Output);
+        // Every attempt gets fresh parameters, because the output parameter belongs to the attempt that set it.
+        return await _retryPolicy.ExecuteAsync(async () =>
+        {
+            var parameters = WithRequest(request);
+            parameters.Add("@Description", transaction.Description);
+            parameters.Add("@EffectiveDate", transaction.EffectiveDate.ToDateTime(TimeOnly.MinValue), DbType.Date);
+            parameters.Add("@Lines", lines.AsTableValuedParameter("dbo.PostingLineList"));
+            parameters.Add("@TransactionId", dbType: DbType.Int64, direction: ParameterDirection.Output);
 
-        await using var connection = new SqlConnection(_connectionString);
-        await connection.ExecuteAsync(new CommandDefinition(
-            "dbo.usp_PostTransaction", parameters, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(new CommandDefinition(
+                "dbo.usp_PostTransaction", parameters, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
 
-        return parameters.Get<long>("@TransactionId");
+            return parameters.Get<long>("@TransactionId");
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -99,16 +119,19 @@ public sealed class SqlLedger
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var parameters = WithRequest(request);
-        parameters.Add("@OriginalTransactionId", originalTransactionId);
-        parameters.Add("@EffectiveDate", effectiveDate.ToDateTime(TimeOnly.MinValue), DbType.Date);
-        parameters.Add("@TransactionId", dbType: DbType.Int64, direction: ParameterDirection.Output);
+        return await _retryPolicy.ExecuteAsync(async () =>
+        {
+            var parameters = WithRequest(request);
+            parameters.Add("@OriginalTransactionId", originalTransactionId);
+            parameters.Add("@EffectiveDate", effectiveDate.ToDateTime(TimeOnly.MinValue), DbType.Date);
+            parameters.Add("@TransactionId", dbType: DbType.Int64, direction: ParameterDirection.Output);
 
-        await using var connection = new SqlConnection(_connectionString);
-        await connection.ExecuteAsync(new CommandDefinition(
-            "dbo.usp_ReverseTransaction", parameters, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(new CommandDefinition(
+                "dbo.usp_ReverseTransaction", parameters, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
 
-        return parameters.Get<long>("@TransactionId");
+            return parameters.Get<long>("@TransactionId");
+        }, cancellationToken);
     }
 
     /// <summary>Reads a stored transaction and its lines, in the order they were posted, or returns null if there's none.</summary>
@@ -147,24 +170,27 @@ public sealed class SqlLedger
     }
 
     /// <summary>
-    /// An account's balance as stored: the sum of every posting on it, signs included. Read it the way a person
-    /// would with <see cref="Account.BalanceOnNormalSide"/>. Phase 4 replaces this sum with a stored balance.
+    /// An account's balance as stored, from dbo.AccountBalances: the sum of every posting on it, signs included, kept
+    /// up to date in the same database transaction as each posting. Read it the way a person would with
+    /// <see cref="Account.BalanceOnNormalSide"/>. Under read-committed snapshot this never waits for a posting.
     /// </summary>
     public async Task<Money> GetStoredBalanceAsync(Account account, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);
 
         const string sql = """
-            SELECT COALESCE(SUM(AmountMinor), 0)
-            FROM dbo.Postings
+            SELECT BalanceMinor
+            FROM dbo.AccountBalances
             WHERE AccountId = @AccountId;
             """;
 
         await using var connection = new SqlConnection(_connectionString);
-        var amountMinor = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+        var amountMinor = await connection.ExecuteScalarAsync<long?>(new CommandDefinition(
             sql, new { AccountId = account.Id }, cancellationToken: cancellationToken));
 
-        return new Money(amountMinor, account.Currency);
+        return amountMinor is { } stored
+            ? new Money(stored, account.Currency)
+            : throw new InvalidOperationException($"Account {account.Id} has no stored balance. Open accounts with usp_CreateAccount.");
     }
 
     /// <summary>
@@ -227,6 +253,7 @@ public sealed class SqlLedger
         await connection.ExecuteScalarAsync<int?>(new CommandDefinition(
             "SELECT TOP (1) 1 FROM dbo.Postings;", cancellationToken: cancellationToken));
     }
+
     // The three values every write carries, as procedure parameters.
     private static DynamicParameters WithRequest(RequestInfo request)
     {
