@@ -170,24 +170,27 @@ public sealed class SqlLedger
     }
 
     /// <summary>
-    /// An account's balance as stored: the sum of every posting on it, signs included. Read it the way a person
-    /// would with <see cref="Account.BalanceOnNormalSide"/>. Phase 4 replaces this sum with a stored balance.
+    /// An account's balance as stored, from dbo.AccountBalances: the sum of every posting on it, signs included, kept
+    /// up to date in the same database transaction as each posting. Read it the way a person would with
+    /// <see cref="Account.BalanceOnNormalSide"/>. Under read-committed snapshot this never waits for a posting.
     /// </summary>
     public async Task<Money> GetStoredBalanceAsync(Account account, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);
 
         const string sql = """
-            SELECT COALESCE(SUM(AmountMinor), 0)
-            FROM dbo.Postings
+            SELECT BalanceMinor
+            FROM dbo.AccountBalances
             WHERE AccountId = @AccountId;
             """;
 
         await using var connection = new SqlConnection(_connectionString);
-        var amountMinor = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+        var amountMinor = await connection.ExecuteScalarAsync<long?>(new CommandDefinition(
             sql, new { AccountId = account.Id }, cancellationToken: cancellationToken));
 
-        return new Money(amountMinor, account.Currency);
+        return amountMinor is { } stored
+            ? new Money(stored, account.Currency)
+            : throw new InvalidOperationException($"Account {account.Id} has no stored balance. Open accounts with usp_CreateAccount.");
     }
 
     /// <summary>
