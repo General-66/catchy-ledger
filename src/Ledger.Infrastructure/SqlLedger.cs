@@ -14,6 +14,12 @@ public sealed class SqlLedger
 {
     /// <summary>The longest description the Transactions table stores (nvarchar(200)).</summary>
     public const int MaxDescriptionLength = 200;
+    
+    /// <summary>The longest account code the Accounts table stores (varchar(20)).</summary>
+    public const int MaxAccountCodeLength = 20;
+
+    /// <summary>The longest account name the Accounts table stores (nvarchar(100)).</summary>
+    public const int MaxAccountNameLength = 100;
 
     private readonly string _connectionString;
 
@@ -23,27 +29,33 @@ public sealed class SqlLedger
         _connectionString = connectionString;
     }
 
-    /// <summary>Opens an account and returns it with the Id SQL Server gave it.</summary>
+    /// <summary>
+    /// Opens an account, with a stored balance of zero, through dbo.usp_CreateAccount, and returns it with the Id
+    /// SQL Server gave it. A code already in use fails with error 2627 on UQ_Accounts_Code.
+    /// </summary>
     public async Task<Account> CreateAccountAsync(
         string code, string name, AccountType type, Currency currency, bool allowOverdraft, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(currency);
+        // A stored procedure silently cuts a too-long value down to its parameter's size, as RequestInfo explains.
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(code.Length, MaxAccountCodeLength, nameof(code));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(name.Length, MaxAccountNameLength, nameof(name));
 
-        const string sql = """
-            INSERT INTO dbo.Accounts (Code, Name, Type, Currency, AllowOverdraft)
-            OUTPUT INSERTED.Id
-            VALUES (@Code, @Name, @Type, @Currency, @AllowOverdraft);
-            """;
+        var parameters = new DynamicParameters();
+        parameters.Add("@Code", code);
+        parameters.Add("@Name", name);
+        parameters.Add("@Type", type.ToString());
+        parameters.Add("@Currency", currency.Code);
+        parameters.Add("@AllowOverdraft", allowOverdraft);
+        parameters.Add("@AccountId", dbType: DbType.Int64, direction: ParameterDirection.Output);
 
         await using var connection = new SqlConnection(_connectionString);
-        var id = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            sql,
-            new { Code = code, Name = name, Type = type.ToString(), Currency = currency.Code, AllowOverdraft = allowOverdraft },
-            cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(
+            "dbo.usp_CreateAccount", parameters, commandType: CommandType.StoredProcedure, cancellationToken: cancellationToken));
 
-        return new Account(id, code, name, type, currency, allowOverdraft);
+        return new Account(parameters.Get<long>("@AccountId"), code, name, type, currency, allowOverdraft);
     }
 
     /// <summary>Finds an account by its Id, or returns null if there's none.</summary>

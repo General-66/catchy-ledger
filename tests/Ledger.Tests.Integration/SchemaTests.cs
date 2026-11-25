@@ -42,7 +42,7 @@ public sealed class SchemaTests(SqlServerFixture sqlServer) : IAsyncLifetime
         var scriptsInDb = typeof(LedgerMigrator).Assembly.GetManifestResourceNames()
             .Count(name => name.StartsWith(LedgerMigrator.ScriptPrefix, StringComparison.Ordinal));
 
-        Assert.Equal(7, scriptsInDb);
+        Assert.Equal(8, scriptsInDb);
         Assert.Equal(scriptsInDb, scriptsRun);
     }
 
@@ -51,7 +51,7 @@ public sealed class SchemaTests(SqlServerFixture sqlServer) : IAsyncLifetime
     {
         LedgerMigrator.Migrate(_database.AdminConnectionString);
 
-        Assert.Equal(7, await _database.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.SchemaVersions;"));
+        Assert.Equal(8, await _database.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.SchemaVersions;"));
     }
 
     [Fact]

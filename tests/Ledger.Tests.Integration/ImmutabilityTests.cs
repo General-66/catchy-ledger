@@ -75,7 +75,7 @@ public sealed class ImmutabilityTests(SqlServerFixture sqlServer) : IAsyncLifeti
     public async Task The_app_role_is_denied_every_direct_write_to_the_books()
     {
         // The ledger table refuses UPDATE and DELETE before the DENY is ever checked, so read the DENYs from
-        // db/0006 straight out of SQL Server's permission catalog instead.
+        // db/0006 and db/0008 straight out of SQL Server's permission catalog instead.
         await using var connection = new SqlConnection(_database.AdminConnectionString);
         var denied = await connection.QueryAsync<string>(
             """
@@ -87,7 +87,11 @@ public sealed class ImmutabilityTests(SqlServerFixture sqlServer) : IAsyncLifeti
         """);
 
         Assert.Equal(
-            new[] { "Postings DELETE", "Postings INSERT", "Postings UPDATE", "Transactions DELETE", "Transactions INSERT", "Transactions UPDATE" },
+            new[]
+            {
+                 "AccountBalances DELETE", "AccountBalances INSERT", "AccountBalances UPDATE", "Accounts INSERT",
+                 "Postings DELETE", "Postings INSERT", "Postings UPDATE", "Transactions DELETE", "Transactions INSERT", "Transactions UPDATE",
+            },
             denied);
     }
 
