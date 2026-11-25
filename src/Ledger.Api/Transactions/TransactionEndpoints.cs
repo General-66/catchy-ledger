@@ -17,7 +17,9 @@ public static class TransactionEndpoints
             .WithName("PostTransaction")
             .WithSummary("Post a balanced transaction")
             .WithDescription("Every line debits or credits one account; debits must equal credits. Send an Idempotency-Key: "
-                + "retrying with the same key and body returns the original transaction instead of posting it again.")
+                + "retrying with the same key and body returns the original transaction instead of posting it again. "
+                + "A transaction that would take an account that can't be overdrawn below zero, such as a wallet, "
+                + "is refused with 422 InsufficientFunds.")
             .Produces<TransactionResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
@@ -34,7 +36,8 @@ public static class TransactionEndpoints
             .WithName("ReverseTransaction")
             .WithSummary("Reverse a transaction")
             .WithDescription("Posts the mirror image of a transaction: the same lines with debits and credits swapped. "
-                + "A transaction can be reversed once, and a reversal can't be reversed. Needs an Idempotency-Key.")
+                + "A transaction can be reversed once, and a reversal can't be reversed. Needs an Idempotency-Key. "
+                + "Like any posting, it's refused with 422 InsufficientFunds if it would overdraw a wallet.")
             .Produces<TransactionResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)

@@ -40,6 +40,7 @@ public static class ProblemCodes
     // 422 Unprocessable Content: well-formed, but the books can't accept it.
     public const string UnknownAccount = "UnknownAccount";
     public const string ReversalOfReversal = "ReversalOfReversal";
+    public const string InsufficientFunds = "InsufficientFunds";
     public const string IdempotencyKeyReused = "IdempotencyKeyReused";
 
     // 500: our fault, not the caller's.
@@ -98,6 +99,8 @@ public static class Problems
         LedgerErrors.MixedCurrencies => Rule(LedgerRule.MixedCurrencies, error),
         LedgerErrors.AccountCurrencyMismatch => Rule(LedgerRule.AccountCurrencyMismatch, error),
         LedgerErrors.Unbalanced => Rule(LedgerRule.Unbalanced, error),
+        LedgerErrors.InsufficientFunds => Create(StatusCodes.Status422UnprocessableEntity, ProblemCodes.InsufficientFunds,
+            "Insufficient funds", error.Message),
         LedgerErrors.UnknownAccount => Create(StatusCodes.Status422UnprocessableEntity, ProblemCodes.UnknownAccount,
             "Unknown account", error.Message),
         LedgerErrors.TransactionNotFound => Create(StatusCodes.Status404NotFound, ProblemCodes.TransactionNotFound,

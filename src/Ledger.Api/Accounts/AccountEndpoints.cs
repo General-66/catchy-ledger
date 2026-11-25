@@ -26,7 +26,8 @@ public static class AccountEndpoints
             .RequireAuthorization(LedgerPolicies.Read)
             .WithName("GetAccount")
             .WithSummary("An account and its current balance")
-            .WithDescription("Until Phase 4 stores balances, the balance is the sum of the account's postings.")
+            .WithDescription("The balance is stored, and updated in the same database transaction as every posting, "
+                + "so it always equals the sum of the account's postings.")
             .Produces<AccountResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound);
 
