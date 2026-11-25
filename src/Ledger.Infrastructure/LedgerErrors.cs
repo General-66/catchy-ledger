@@ -13,6 +13,12 @@ public static class LedgerErrors
     public const int AccountCurrencyMismatch = 50004;
     public const int Unbalanced = 50005;
 
+    /// <summary>
+    /// An account that doesn't allow overdrafts would end below zero on its normal side. Only the database can check
+    /// this, because only the database knows the balance at the moment of posting.
+    /// </summary>
+    public const int InsufficientFunds = 50006;
+
     public const int UnknownAccount = 50010;
     public const int TransactionNotFound = 50011;
     public const int AlreadyReversed = 50012;
@@ -20,6 +26,9 @@ public static class LedgerErrors
 
     /// <summary>A required value such as CreatedBy or the Idempotency-Key was missing.</summary>
     public const int MissingRequestDetails = 50020;
+
+    /// <summary>An account has no row in dbo.AccountBalances, so it was opened some other way than usp_CreateAccount.</summary>
+    public const int MissingBalanceRow = 50021;
 
     /// <summary>SQL Server's own error for a duplicate value in a UNIQUE constraint, such as a reused Idempotency-Key.</summary>
     public const int DuplicateKey = 2627;
@@ -32,4 +41,10 @@ public static class LedgerErrors
 
     /// <summary>SQL Server's own error for an UPDATE or DELETE on an append-only ledger table, whoever runs it.</summary>
     public const int AppendOnlyLedgerTable = 37359;
+
+    /// <summary>
+    /// SQL Server's own error for a deadlock victim. SQL Server rolled the victim's whole transaction back, so running
+    /// it again is safe. <see cref="SqlRetryPolicy"/> does that.
+    /// </summary>
+    public const int Deadlock = 1205;
 }
